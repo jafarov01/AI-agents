@@ -1,0 +1,20 @@
+# Secrets
+.env
+.env.*.local
+.env.test.local
+
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Build / temp
+dist/
+coverage/

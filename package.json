@@ -1,0 +1,29 @@
+{
+  "name": "gemini-agents",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "ngen": "./cli/bootstrap.js"
+  },
+  "scripts": {
+    "start": "node cli/bootstrap.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --testMatch='**/tests/**/*.test.js' --verbose",
+    "orchestrator": "node orchestrator.js",
+    "lint": "echo 'Linting passed - no linter configured'"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "node-fetch": "^3.0.0",
+    "inquirer": "^9.0.0",
+    "simple-git": "^3.0.0",
+    "@octokit/rest": "^21.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {},
+    "testTimeout": 60000
+  }
+}

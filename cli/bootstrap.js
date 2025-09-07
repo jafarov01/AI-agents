@@ -8,21 +8,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import simpleGit from "simple-git";
 import { generateProductPlan } from "../lib/plannerAgent.js";
 import { createRepoIfNotExists, createIssue } from "../lib/github.js";
+import { sanitizeForLog, sanitizePath } from "../lib/utils/security.js";
 
 const git = simpleGit();
 
 function copyTemplate(templateName, targetDir) {
-  const templatePath = path.join(__dirname, '..', 'templates', templateName);
-  if (!fs.existsSync(templatePath)) {
-    console.log('Template not found:', templateName.replace(/[\r\n]/g, ''));
+  const templatePath = sanitizePath(path.join(__dirname, '..', 'templates', templateName));
+  if (!existsSync(templatePath)) {
+    console.log('Template not found:', sanitizeForLog(templateName));
     return;
   }
   // naive recursive copy
   function copyDir(src, dest) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-      const srcPath = join(src, entry.name);
-      const destPath = join(dest, entry.name);
+      const srcPath = sanitizePath(path.join(src, entry.name));
+      const destPath = sanitizePath(path.join(dest, entry.name));
       if (entry.isDirectory()) copyDir(srcPath, destPath);
       else fs.copyFileSync(srcPath, destPath);
     }
@@ -34,9 +35,10 @@ function safeName(name) {
   return name.toLowerCase().replace(/[^a-z0-9\-]+/g, '-').replace(/^\-+|\-+$/g,'');
 }
 
-async function writeFile(filepath, content) {
-  fs.mkdirSync(path.dirname(filepath), { recursive: true });
-  fs.writeFileSync(filepath, content, 'utf8');
+function writeFile(filepath, content) {
+  const safePath = sanitizePath(filepath);
+  fs.mkdirSync(path.dirname(safePath), { recursive: true });
+  fs.writeFileSync(safePath, content, 'utf8');
 }
 
 async function initLocalGit(dir) {
@@ -45,7 +47,7 @@ async function initLocalGit(dir) {
     await git.add('.');
     await git.commit("chore: initial scaffold from gemini-agents template");
   } catch (error) {
-    console.error('Failed to initialize git:', error.message);
+    console.error('Failed to initialize git:', sanitizeForLog(error.message));
     throw error;
   }
 }
@@ -58,7 +60,7 @@ async function pushToRemote(owner, repoName, remoteUrl) {
     await git.commit("chore: initial commit");
     await git.push(['-u', 'origin', 'main']);
   } catch (error) {
-    console.error('Failed to push to remote:', error.message);
+    console.error('Failed to push to remote:', sanitizeForLog(error.message));
     throw error;
   }
 }
@@ -81,8 +83,8 @@ async function main() {
 
   console.log("Asking Gemini for plan...");
   const plan = await generateProductPlan(idea, answers.stackHint);
-  console.log("Suggested stack:", plan.stack?.replace(/[\r\n]/g, '') || 'Unknown');
-  console.log("Phases:", plan.phases?.map(p=>p.name?.replace(/[\r\n]/g, '')).join(", ") || 'None');
+  console.log("Suggested stack:", sanitizeForLog(plan.stack || 'Unknown'));
+  console.log("Phases:", plan.phases?.map(p=>sanitizeForLog(p.name || '')).join(", ") || 'None');
 
   // create skeleton files
   writeFile(`${projectName}/README.md`, `# ${projectName}\n\n${idea}\n\nSuggested stack: ${plan.stack}\n`);
@@ -92,11 +94,12 @@ async function main() {
   // write a top-level plan file
   writeFile(`${projectName}/PRODUCT_PLAN.json`, JSON.stringify(plan, null, 2));
 
-  console.log(`Project skeleton written to ./${projectName.replace(/[\r\n]/g, '')}`);
+  console.log(`Project skeleton written to ./${sanitizeForLog(projectName)}`);
 
   // init git inside that folder and optionally create remote
   const originalDir = process.cwd();
-  process.chdir(projectName);
+  try {
+    process.chdir(projectName);
   await git.init();
   await git.add('.');
   await git.commit("chore: scaffold initial project");
@@ -113,12 +116,13 @@ async function main() {
       await git.branch(['-M', 'main']);
       await git.push('origin', 'main');
     } catch (error) {
-      console.error('Failed to setup remote:', error.message);
+      console.error('Failed to setup remote:', sanitizeForLog(error.message));
       throw error;
     }
-    console.log("Pushed to remote:", remoteUrl?.replace(/[\r\n]/g, '') || 'Unknown');
+    console.log("Pushed to remote:", sanitizeForLog(remoteUrl || 'Unknown'));
 
     // create issues for plan
+    if (plan.phases && Array.isArray(plan.phases)) {
     for (const phase of plan.phases) {
       // create a phase issue as epic
       const phaseIssue = await createIssue(ghOwner, projectName, `[Phase] ${phase.name}`, phase.description);
@@ -127,9 +131,16 @@ async function main() {
       }
     }
     console.log("Created issues for plan in GitHub.");
+    }
   }
 
   console.log("Done. Clone the new repo and run your usual dev setup.");
+  } catch (error) {
+    console.error('Bootstrap failed:', sanitizeForLog(error.message));
+    throw error;
+  } finally {
+    process.chdir(originalDir);
+  }
 }
 
 main().catch(err=>{ console.error(err); process.exit(1); });

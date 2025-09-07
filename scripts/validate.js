@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // scripts/validate.js - Validates repo structure and readiness
 
-import fs from 'fs';
+import fs from 'fs/promises';
+import { existsSync, statSync, readFileSync } from 'fs';
 import path from 'path';
+
+function sanitizeForLog(input) {
+  if (typeof input !== 'string') return String(input);
+  return input.replace(/[\r\n\t\x00-\x1f\x7f-\x9f]/g, '');
+}
 
 const requiredFiles = [
   '.env.example',
@@ -48,7 +54,7 @@ let allValid = true;
 // Check required files
 console.log('📁 Checking required files:');
 for (const file of requiredFiles) {
-  const exists = fs.existsSync(file);
+  const exists = existsSync(file);
   console.log(`  ${exists ? '✅' : '❌'} ${file}`);
   if (!exists) allValid = false;
 }
@@ -56,7 +62,7 @@ for (const file of requiredFiles) {
 // Check required directories
 console.log('\n📂 Checking required directories:');
 for (const dir of requiredDirs) {
-  const exists = fs.existsSync(dir) && fs.statSync(dir).isDirectory();
+  const exists = existsSync(dir) && statSync(dir).isDirectory();
   console.log(`  ${exists ? '✅' : '❌'} ${dir}/`);
   if (!exists) allValid = false;
 }
@@ -64,7 +70,7 @@ for (const dir of requiredDirs) {
 // Check package.json configuration
 console.log('\n⚙️  Checking package.json configuration:');
 try {
-  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
   
   const checks = [
     ['type === "module"', pkg.type === 'module'],
@@ -80,23 +86,23 @@ try {
     if (!valid) allValid = false;
   }
 } catch (e) {
-  console.log('  ❌ package.json is invalid JSON');
+  console.log(`  ❌ package.json error: ${sanitizeForLog(e.message)}`);
   allValid = false;
 }
 
 // Check .env.example
 console.log('\n🔐 Checking .env.example:');
 try {
-  const envExample = fs.readFileSync('.env.example', 'utf8');
+  const envExample = readFileSync('.env.example', 'utf8');
   const requiredVars = ['GEMINI_API_KEY', 'GITHUB_TOKEN', 'GITHUB_OWNER'];
   
   for (const envVar of requiredVars) {
-    const exists = envExample.includes(envVar);
+    const exists = new RegExp(`^${envVar}=`, 'm').test(envExample);
     console.log(`  ${exists ? '✅' : '❌'} ${envVar}`);
     if (!exists) allValid = false;
   }
 } catch (e) {
-  console.log('  ❌ .env.example not readable');
+  console.log(`  ❌ .env.example error: ${sanitizeForLog(e.message)}`);
   allValid = false;
 }
 

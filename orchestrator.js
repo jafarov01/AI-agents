@@ -8,6 +8,7 @@ import { writeFailingTest } from './lib/agents/testerAgent.js';
 import { implementCode } from './lib/agents/coderAgent.js';
 import { reviewCodeAndTests } from './lib/agents/reviewerAgent.js';
 import { Octokit } from "@octokit/rest";
+import { sanitizeForLog, sanitizePath } from './lib/utils/security.js';
 
 const git = simpleGit();
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
@@ -19,22 +20,22 @@ async function createBranch(branchName) {
     await git.fetch();
     await git.checkoutLocalBranch(branchName);
   } catch (error) {
-    console.error(`Failed to create branch ${branchName}:`, error.message);
+    console.error(`Failed to create branch ${sanitizeForLog(branchName)}:`, error.message);
     throw error;
   }
 }
 
 function writeFileRel(relPath, content) {
-  const p = path.resolve(process.cwd(), relPath);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, content, 'utf8');
-  console.log("Wrote", relPath);
+  const sanitizedPath = sanitizePath(relPath);
+  fs.mkdirSync(path.dirname(sanitizedPath), { recursive: true });
+  fs.writeFileSync(sanitizedPath, content, 'utf8');
+  console.log("Wrote", sanitizeForLog(relPath));
 }
 
 function runTests(testPath) {
   try {
     // Adjust this command for your test runner (jest, pytest, etc.)
-    console.log("Running tests for:", testPath.replace(/[\r\n]/g, ''));
+    console.log("Running tests for:", sanitizeForLog(testPath));
     execSync(`npx jest ${testPath} --runInBand`, { stdio: 'inherit' });
     return true;
   } catch (e) {
@@ -49,7 +50,7 @@ async function commitAndPush(branchName, message) {
     await git.commit(message);
     await git.push('origin', branchName, { '--set-upstream': null });
   } catch (error) {
-    console.error(`Failed to commit and push:`, error.message);
+    console.error(`Failed to commit and push:`, sanitizeForLog(error.message));
     throw error;
   }
 }
@@ -69,7 +70,7 @@ async function openPR(branchName, title, body) {
     title,
     body,
   });
-  console.log("PR created:", data.html_url.replace(/[\r\n]/g, ''));
+  console.log("PR created:", sanitizeForLog(data.html_url));
   return data.html_url;
 }
 
@@ -79,9 +80,9 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
 
   // 1) Tester writes failing test
   const { filename: testFile, code: testCode } = await writeFailingTest(featureName);
-  const testPath = path.join(REPO_PATH, testFile);
+  const testPath = sanitizePath(path.join(REPO_PATH, testFile));
   writeFileRel(testPath, testCode);
-  await commitAndPush(branch, `test: Add failing test for ${featureName.replace(/[\r\n]/g, '')}`);
+  await commitAndPush(branch, `test: Add failing test for ${sanitizeForLog(featureName)}`);
 
   // 2) Run tests -> should fail
   let passed = runTests(testPath);
@@ -94,9 +95,9 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
       iter++;
       const existingFiles = ""; // read any existing files if needed
       const { filename: implFile, code: implCode } = await implementCode(testCode, existingFiles);
-      const implPath = path.join(REPO_PATH, implFile);
+      const implPath = sanitizePath(path.join(REPO_PATH, implFile));
       writeFileRel(implPath, implCode);
-      await commitAndPush(branch, `feat: Implement ${implFile.replace(/[\r\n]/g, '')} for ${featureName.replace(/[\r\n]/g, '')} (iter ${iter})`);
+      await commitAndPush(branch, `feat: Implement ${sanitizeForLog(implFile)} for ${sanitizeForLog(featureName)} (iter ${iter})`);
       passed = runTests(testPath);
     }
   }
@@ -107,9 +108,10 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
     const code = fs.readFileSync(path.resolve(REPO_PATH, 'add.js'), 'utf8');
     const tests = fs.readFileSync(path.resolve(testPath), 'utf8');
     const review = await reviewCodeAndTests(code, tests);
-    const reviewPath = path.join(REPO_PATH, 'AI_REVIEW.md');
-    writeFileRel(reviewPath, `## AI Review for ${featureName}\n\n${JSON.stringify(review, null, 2)}`);
-    await commitAndPush(branch, `docs: Add AI review for ${featureName.replace(/[\r\n]/g, '')}`);
+    const reviewPath = sanitizePath(path.join(REPO_PATH, 'AI_REVIEW.md'));
+    const safeReview = typeof review === 'object' ? review : { error: 'Invalid review format' };
+    writeFileRel(reviewPath, `## AI Review for ${featureName}\n\n${JSON.stringify(safeReview, null, 2)}`);
+    await commitAndPush(branch, `docs: Add AI review for ${sanitizeForLog(featureName)}`);
 
     // 5) Open PR (human to merge)
     const prUrl = await openPR(branch, `Feature: ${featureName}`, `Automated PR created by agent flow for ${featureName}.\n\nAI Review:\n${JSON.stringify(review, null, 2)}`);

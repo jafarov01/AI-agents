@@ -1,80 +1,39 @@
-# Setup Guide for Gemini Agents
+# Setup Guide
 
-## Quick Setup for New Projects
+## Quick Setup
 
-1. **Clone this repository as your project base:**
 ```bash
-git clone <your-gemini-agents-repo-url> my-new-project
-cd my-new-project
-rm -rf .git  # Remove existing git history
-git init     # Start fresh
-```
+# 1. Clone as your project base
+git clone <this-repo> my-project && cd my-project
+rm -rf .git && git init
 
-2. **Install dependencies:**
-```bash
+# 2. Setup environment
+cp .env.example .env  # Add your API keys
 npm install
-```
 
-3. **Configure environment:**
-```bash
-cp .env.example .env
-# Edit .env with your actual API keys and settings
-```
-
-4. **Required API Keys:**
-- **GEMINI_API_KEY**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
-- **GITHUB_TOKEN**: Create at [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
-  - Required scopes: `repo`, `workflow`, `write:packages`
-- **GITHUB_OWNER**: Your GitHub username
-
-5. **Test the setup:**
-```bash
+# 3. Test setup
 npm test
+
+# 4. Start building
+npx ngen  # Create AI-planned project
 ```
 
-6. **Start using the agents:**
-```bash
-# Bootstrap a new project
-npx ngen
+## Required API Keys
 
-# Or develop features with TDD
-node orchestrator.js "Add user authentication"
-```
-
-## Project Structure
-
-```
-your-project/
-├── cli/                 # Project bootstrapping
-├── lib/agents/          # AI agents for development
-├── docs/               # Documentation
-├── templates/          # Project templates
-└── .github/workflows/  # CI/CD pipelines
-```
-
-## Usage Patterns
-
-### 1. New Project Creation
-Use the CLI to create a new project with AI planning and GitHub integration.
-
-### 2. Feature Development
-Use the orchestrator for Test-Driven Development with AI assistance.
-
-### 3. Manual Agent Usage
-Import and use individual agents programmatically in your own scripts.
-
-## Security Notes
-
-- Never commit `.env` files
-- Use environment variables in production
-- Regularly update dependencies
-- Review AI-generated code before deployment
+Edit `.env` with:
+- **GEMINI_API_KEY**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+- **GITHUB_TOKEN**: Create at [GitHub Settings > Tokens](https://github.com/settings/tokens) (needs `repo`, `workflow` scopes)
+- **GITHUB_OWNER**: Your GitHub username
 
 ## Troubleshooting
 
-**Common Issues:**
-- API key errors: Verify keys in `.env`
-- Git errors: Check GitHub token permissions
-- Template errors: Ensure templates exist in `cli/templates/`
+**GitHub Token Error (403):**
+- Ensure token has `repo` and `workflow` scopes
+- Check token isn't expired
+- Verify GITHUB_OWNER matches your username
 
-For more details, see `docs/USAGE.md`
+**API Key Issues:**
+- Verify GEMINI_API_KEY is correct
+- Check API quotas/billing
+
+**For complete documentation: [docs/README.md](docs/README.md)**

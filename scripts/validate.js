@@ -32,10 +32,11 @@ const requiredFiles = [
   'docs/EXAMPLES.md',
   'tests/agents.test.js',
   'tests/workflow.test.js',
-  'TEST_SETUP.md',
   'tests/README.md',
   'docs/README.md',
-  'docs/REUSABLE_PROJECT_GUIDE.md'
+  'docs/REUSABLE_PROJECT_GUIDE.md',
+  'docs/TODO_WEB_APP_EXAMPLE.md',
+  'WORKFLOW_VALIDATION.md'
 ];
 
 const requiredDirs = [

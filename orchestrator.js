@@ -7,13 +7,26 @@ import simpleGit from 'simple-git';
 import { writeFailingTest } from './lib/agents/testerAgent.js';
 import { implementCode } from './lib/agents/coderAgent.js';
 import { reviewCodeAndTests } from './lib/agents/reviewerAgent.js';
-import { Octokit } from "@octokit/rest";
+import { getIssue, updateIssue, octokitClient } from './lib/github.js';
 import { sanitizeForLog, sanitizePath } from './lib/utils/security.js';
 
 const git = simpleGit();
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const octokit = octokitClient();
 
-const REPO_PATH = process.env.GITHUB_REPO || 'example-project';
+// Validate dependencies
+function validateDependencies() {
+  const missing = [];
+  if (!process.env.GITHUB_TOKEN) missing.push('GITHUB_TOKEN');
+  if (!process.env.GITHUB_OWNER) missing.push('GITHUB_OWNER');
+  if (!process.env.GITHUB_REPO) missing.push('GITHUB_REPO');
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}\n\nPlease ensure your .env file has:\n- GITHUB_TOKEN: Personal access token with 'repo' and 'workflow' scopes\n- GITHUB_OWNER: Your GitHub username\n- GITHUB_REPO: Repository name you're working on`);
+  }
+}
+
+validateDependencies();
+const REPO_PATH = process.cwd(); // Use current directory instead of env var
 
 async function createBranch(branchName) {
   try {
@@ -75,14 +88,41 @@ async function openPR(branchName, title, body) {
 }
 
 export async function runFeatureFlow(featureName, maxIterations = 3) {
-  const branch = `feature/${featureName.replace(/\s+/g, '-').toLowerCase()}`;
+  let issueData = null;
+  let actualFeatureName = featureName;
+  
+  // Check if featureName is a GitHub issue number (e.g., "#1", "#2")
+  const issueMatch = featureName.match(/^#(\d+)$/);
+  if (issueMatch) {
+    const issueNumber = parseInt(issueMatch[1]);
+    console.log(`Fetching GitHub issue #${issueNumber}...`);
+    
+    try {
+      issueData = await getIssue(process.env.GITHUB_OWNER, process.env.GITHUB_REPO, issueNumber);
+      actualFeatureName = issueData.title;
+      console.log(`Working on: ${sanitizeForLog(actualFeatureName)}`);
+      console.log(`Description: ${sanitizeForLog(issueData.body?.substring(0, 100) || 'No description')}...`);
+      
+      // Update issue to "In Progress"
+      await updateIssue(process.env.GITHUB_OWNER, process.env.GITHUB_REPO, issueNumber, {
+        labels: ['in-progress']
+      });
+    } catch (error) {
+      console.error(`Failed to fetch issue #${issueNumber}:`, error.message);
+      throw error;
+    }
+  }
+  
+  const safeName = actualFeatureName.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+  const branch = issueData ? `feature/issue-${issueMatch[1]}-${safeName}` : `feature/${safeName}`;
   await createBranch(branch);
 
-  // 1) Tester writes failing test
-  const { filename: testFile, code: testCode } = await writeFailingTest(featureName);
+  // 1) Tester writes failing test based on issue or feature description
+  const testContext = issueData ? `${actualFeatureName}\n\nDetails: ${issueData.body || ''}` : actualFeatureName;
+  const { filename: testFile, code: testCode } = await writeFailingTest(testContext);
   const testPath = sanitizePath(path.join(REPO_PATH, testFile));
   writeFileRel(testPath, testCode);
-  await commitAndPush(branch, `test: Add failing test for ${sanitizeForLog(featureName)}`);
+  await commitAndPush(branch, `test: Add failing test for ${sanitizeForLog(actualFeatureName)}`);
 
   // 2) Run tests -> should fail
   let passed = runTests(testPath);
@@ -97,7 +137,7 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
       const { filename: implFile, code: implCode } = await implementCode(testCode, existingFiles);
       const implPath = sanitizePath(path.join(REPO_PATH, implFile));
       writeFileRel(implPath, implCode);
-      await commitAndPush(branch, `feat: Implement ${sanitizeForLog(implFile)} for ${sanitizeForLog(featureName)} (iter ${iter})`);
+      await commitAndPush(branch, `feat: Implement ${sanitizeForLog(implFile)} for ${sanitizeForLog(actualFeatureName)} (iter ${iter})`);
       passed = runTests(testPath);
     }
   }
@@ -114,7 +154,20 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
     await commitAndPush(branch, `docs: Add AI review for ${sanitizeForLog(featureName)}`);
 
     // 5) Open PR (human to merge)
-    const prUrl = await openPR(branch, `Feature: ${featureName}`, `Automated PR created by agent flow for ${featureName}.\n\nAI Review:\n${JSON.stringify(review, null, 2)}`);
+    const prTitle = issueData ? `${actualFeatureName} (closes #${issueMatch[1]})` : `Feature: ${actualFeatureName}`;
+    const prBody = issueData ? 
+      `Automated PR for issue #${issueMatch[1]}\n\n**Original Issue:** ${actualFeatureName}\n\n**AI Review:**\n\`\`\`json\n${JSON.stringify(review, null, 2)}\n\`\`\`\n\nCloses #${issueMatch[1]}` :
+      `Automated PR created by agent flow for ${actualFeatureName}.\n\nAI Review:\n${JSON.stringify(review, null, 2)}`;
+    
+    const prUrl = await openPR(branch, prTitle, prBody);
+    
+    // Update issue status if working from GitHub issue
+    if (issueData) {
+      await updateIssue(process.env.GITHUB_OWNER, process.env.GITHUB_REPO, parseInt(issueMatch[1]), {
+        labels: ['ready-for-review']
+      });
+    }
+    
     return prUrl;
   } else {
     console.error("Tests did not pass after max iterations. Please review manually.");
@@ -126,7 +179,11 @@ export async function runFeatureFlow(featureName, maxIterations = 3) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const fn = process.argv[2];
   if (!fn) {
-    console.log("Usage: node orchestrator.js \"Feature description\"");
+    console.log("Usage: node orchestrator.js \"Feature description\" OR node orchestrator.js \"#1\" (GitHub issue number)");
+    console.log("\nExamples:");
+    console.log('  node orchestrator.js "Add user authentication"');
+    console.log('  node orchestrator.js "#1"  # Work on GitHub issue #1');
+    console.log('  node orchestrator.js "#5"  # Work on GitHub issue #5');
     process.exit(1);
   }
   runFeatureFlow(fn).catch(err => { console.error(err); process.exit(2); });
